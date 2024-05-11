@@ -1425,7 +1425,11 @@ public:
                 new RV32MicroCodeGenerator(ttamachine_, bem_, entityString);
             microCodeGen->setBypassInstructionRegister(
                 bypassInstructionRegister());
-            microCodeGen->generateRTL(instantiator, dstDirectory);
+            if (language == VHDL)
+                microCodeGen->generateRTL(instantiator, dstDirectory);
+            else if(language == Verilog)
+                microCodeGen-> generateVerilog(instantiator, dstDirectory);
+        
         }
 
         if (generateBusTrace()) {
