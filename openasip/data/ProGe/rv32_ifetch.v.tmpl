@@ -1,0 +1,287 @@
+/* Copyright (c) 2002-2009 Tampere University.
+
+   This file is part of TTA-Based Codesign Environment (TCE).
+
+   Permission is hereby granted, free of charge, to any person obtaining a
+   copy of this software and associated documentation files (the "Software"),
+   to deal in the Software without restriction, including without limitation
+   the rights to use, copy, modify, merge, publish, distribute, sublicense,
+   and/or sell copies of the Software, and to permit persons to whom the
+   Software is furnished to do so, subject to the following conditions:
+ 
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+ 
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+*/
+`timescale 10ns/1ns
+module ENTITY_STR_ifetch 
+#(
+`include "ENTITY_STR_globals_pkg.vh"
+,
+`include "gcu_opcodes_pkg.vh"
+,
+`include "ENTITY_STR_imem_mau_pkg.vh"
+    parameter debug_logic_g = false,
+    parameter bypass_fetchblock_register = false,
+    parameter pc_init_g = {IMEMADDRWIDTH-1{1'b0}}
+)
+    (
+    // program counter in
+    input pc_in[31:0];
+    //return address out
+    output ra_out[IMEMADDRWIDTH-1:0];
+    // return address in
+    input ra_in[IMEMADDRWIDTH-1:0];
+    // ifetch control signals
+    input pc_load;
+    input ra_load;
+    input pc_opcode[3:0];
+    //instruction memory interface
+    input imem_data[IMEMWIDTHINMAUS*IMEMMAUWIDTH-1:0];
+    output imem_addr[IMEMADDRWIDTH-1:0];
+    output imem_en_x;
+    output fetchblock[IMEMWIDTHINMAUS*IMEMMAUWIDTH-1:0];
+    input busy;
+
+    // global lock
+    output glock;
+
+    // external control interface
+    input fetch_en;             //fetch_enable
+    
+    input in_data[31:0];
+    input in2_data[31:0];
+    input in2_load;
+    input in_load;
+    
+    
+    output out_data[31:0];
+    input ifetch_stall;
+
+    input rv_jump;
+    input rv_auipc;
+    input rv_offset[31:0];
+
+    input clk;
+    input rstx;
+    );
+
+
+
+
+    // signals for program counter
+    reg pc_reg[IMEMADDRWIDTH-1:0];
+    reg pc_prev_reg[IMEMADDRWIDTH-1:0];
+    reg next_pc[IMEMADDRWIDTH-1:0];
+
+    reg control_pc[IMEMADDRWIDTH-1:0];
+    reg control_pc_next[IMEMADDRWIDTH-1:0];
+
+    reg increased_pc[IMEMADDRWIDTH-1:0];
+    reg return_addr_reg[IMEMADDRWIDTH-1:0];
+
+    // internal signals for initializing and locking execution
+    wire lock;
+
+    reg reset_lock;
+    parameter IFETCH_DELAY=1;
+
+    reg take_cond_branch;
+    reg cond[31:0];
+    reg comp[31:0];
+ 
+    // Placeholder signals for debug ports
+    parameter db_rstx='1';
+    parameter db_lockreq='0';
+    parameter db_pc_start={IMEMADDRWIDTH-1{1'b0}};
+
+    reg cyclecnt_r[63:0];
+    reg lockcnt_r[63:0];
+    reg db_cyclecnt[63:0];
+    reg db_lockcnt[63:0];
+    reg db_pc[IMEMADDRWIDTH-1:0];
+    reg db_pc_next[IMEMADDRWIDTH-1:0];
+ 
+    reg calla_address[31:0];
+    reg apc_result_reg[31:0];
+    
+    // enable instruction memory
+    assign imem_en_x = (fetch_en & ~ifetch_stall) ? 1'b0: 1'b1;
+    // do not fetch new instruction when processor is locked
+    assign imem_addr = (~lock & ~ifetch_stall) ? pc_reg: pc_prev_reg;
+
+    // propagate lock to global lock
+    assign glock = busy | reset_lock | ~fetch_en;
+    assign ra_out = return_addr_reg;
+
+    assign lock = ~fetch_en | busy;
+    calla_address <= (pc_in + cond)[31:0];
+  
+    always@(posedge clk, rstx)
+    begin
+        if (~rstx)
+            apc_result_reg <= 32'b0;
+        else if (clk)   // it was a posedge on clk
+            if (rv_auipc & ~lock)
+                apc_result_reg <= control_pc[31:0] + rv_offset
+    end
+
+
+    out_data <= apc_result_reg;
+    
+`ifdef bypass_fetchblock_register
+
+    reg instruction_reg[IMEMWIDTHINMAUS*IMEMMAUWIDTH-1:0];
+    reg reset_cntr[IFETCH_DELAY:0];
+    reg pc_prev_prev_reg[IMEMADDRWIDTH-1:0];
+
+    control_pc <= pc_prev_prev_reg;
+    control_pc_next <= pc_prev_reg;
+
+    always@(posedge clk, rstx)
+    begin
+        if (~rstx)
+        begin
+            instruction_reg <= {IMEMWIDTHINMAUS*IMEMMAUWIDTH{1'b0}};
+            reset_cntr <= 1'b0;
+            reset_lock <= 1'b1;
+            pc_prev_prev_reg <= {IMEMADDRWIDTH{1'b0}};
+        end
+        else if (clk) // got a posedge clk
+            if (~lock & ~ifetch_stall)
+            begin
+                pc_prev_prev_reg <= pc_prev_reg;
+                instruction_reg <= imem_data[IMEMWIDTHINMAUS*IMEMMAUWIDTH:0];
+            end
+            if (~lock)
+                if (reset_cntr < IFETCH_DELAY)
+                    reset_cntr <= reset_cntr + 1'b1;
+                else
+                    reset_lock <= 1'b0;
+    end
+    fetchblock <= instruction_reg;
+
+`else // bypass_fetchblock_register
+
+    fetchblock <= imem_data[IMEMWIDTHINMAUS*IMEMMAUWIDTH-1:0];
+    control_pc <= pc_prev_reg;
+    control_pc_next <= pc_reg;
+
+    always@(posedge clk, rstx)
+    begin
+        if (~rstx)
+            reset_lock <= 1'b1;
+        else if (clk)
+            if (~lock)
+                reset_lock <= 1'b0;
+    end
+`endif // bypass_fetchblock_register
+
+    always@(posedge clk, rstx)
+    begin
+        if (~rstx)
+        begin
+            pc_reg          <= pc_init_g;
+            pc_prev_reg     <= {IMEMADDRWIDTH{1'b0}};
+            return_addr_reg <= {IMEMADDRWIDTH{1'b0}};
+        end
+        else if (clk)
+            if (~lock)
+            begin
+                pc_reg      <= next_pc;
+                pc_prev_reg <= pc_reg;
+            end
+            if (~lock & (pc_load | rv_jump))
+                return_addr_reg <= control_pc + IMEMWIDTHINMAUS;
+    end
+    
+    always@(pc_opcode, cond, comp)
+    begin
+        case (pc_opcode)
+            IFE_BGER: begin
+                if (cond >= comp)
+                    take_cond_branch <= 1'b1;
+            end
+            IFE_BGEUR: begin
+                if (cond >= comp)
+                    take_cond_branch <= 1'b1;
+            end
+            IFE_BLTR: begin
+                if (cond < comp)
+                    take_cond_branch <= 1'b1;
+            end
+            IFE_BLTUR: begin
+                if (cond < comp)
+                    take_cond_branch <= 1'b1;
+            end
+            IFE_BNER: begin
+                if (cond != comp)
+                    take_cond_branch <= 1'b1;
+            end
+            IFE_BEQR: begin
+                if (cond == comp)
+                    take_cond_brand <= 1'b1;
+            end
+            default: take_cond_branch <= 1'b0;
+        endcase
+        cond <=in_data;
+        comp <=in2_data;
+    end
+
+  
+
+
+    // increase program counter
+    increased_pc <= pc_reg + IMEMWIDTHINMAUS;
+    always@(rv_jump, rv_offset, pc_load, pc_in, increased_pc, pc_opcode, take_cond_branch, calla_address, control_pc, control_pc_next)
+    begin
+    //branch
+    if (pc_load & pc_opcode == IFE_CALLA)
+        next_pc <= calla_address[IMEMADDRWIDTH-1:0];
+    else if (take_cond_branch & pc_load)
+            next_pc <= control_pc + pc_in[IMEMADDRWIDTH-1:0];
+        else if (pc_load)
+            next_pc <= control_pc_next;
+            else if (rv_jump)
+                next_pc <= control_pc + rv_offset[IMEMADDRWIDTH-1:0];
+    //no branch
+                else
+                    next_pc <= increased_pc;
+    end
+
+/*-----------------------------------------------------------------------------
+  Debugger processes and signal assignments
+-----------------------------------------------------------------------------*/
+`ifdef debug_logic_g
+    always@(posedge clk, rstx)
+    begin
+    
+        if (~rstx)
+        begin
+            lockcnt_r  <= (others => '0');
+            cyclecnt_r <= (others => '0');
+        end
+        else if  (clk))
+            if (~db_lockreq)
+                if (lock)
+                    lockcnt_r  <= lockcnt_r  + 1;
+                else
+                    cyclecnt_r <= cyclecnt_r + 1;
+    end
+
+
+    db_cyclecnt <= std_logic_vector(cyclecnt_r);
+    db_lockcnt  <= std_logic_vector(lockcnt_r);
+    db_pc       <= pc_reg;
+    db_pc_next  <= next_pc;
+`endif
+endmodule
+
+
