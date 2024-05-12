@@ -1563,6 +1563,12 @@ RV32MicroCodeGenerator::generateRTL(
 }
 
 void
+RV32MicroCodeGenerator::generateVerilog(
+    HDLTemplateInstantiator& instantiator, const std::string& fileDst) {
+    std::cout << "Generate Verilog Risv32 RTL" << std::endl;
+}
+
+void
 RV32MicroCodeGenerator::setBypassInstructionRegister(const bool& value) {
     bypassInstructionRegister_ = value;
 }

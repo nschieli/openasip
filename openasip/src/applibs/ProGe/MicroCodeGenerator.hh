@@ -55,6 +55,8 @@ public:
     virtual void generateRTL(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst) = 0;
 
+    void generateVerilog(HDLTemplateInstantiator& instantiator,
+    const std::string& fileDst);
     struct Connection {
         Bus* bus;
         Port* port;

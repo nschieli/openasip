@@ -74,6 +74,9 @@ public:
     void generateRTL(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst);
 
+    void generateVerilog(HDLTemplateInstantiator& instantiator,
+    const std::string& fileDst);
+
     void setBypassInstructionRegister(const bool& value);
 
 
