@@ -1193,9 +1193,9 @@ RV32MicroCodeGenerator::addRs1ForwardingConditionsVerilog(
                 delete val.second;
             }
         }
-        stream << "          end;" << std::endl;
+        stream << "          end" << std::endl;
     }
-    stream << "          end;" << std::endl;
+    stream << "          end" << std::endl;
 }
 
 void
@@ -1279,9 +1279,9 @@ RV32MicroCodeGenerator::addRs2ForwardingConditionsVerilog(
                 delete val.second;
             }
         }
-        stream << "          end;" << std::endl;
+        stream << "          end" << std::endl;
     }
-    stream << "        end;" << std::endl;
+    stream << "        end" << std::endl;
 }
 
 void
@@ -1568,7 +1568,7 @@ RV32MicroCodeGenerator::generateMapVerilog(const std::string& dstDirectory) {
         addRs1ForwardingConditionsVerilog(
             iOperations_,
             &ProGe::RV32MicroCodeGenerator::constructIInstructions, stream);
-        stream << "      end;\n"
+        stream << "      end\n"
                << "    if(rs2_hazard == 1'b1) begin\n";
         addRs2ForwardingConditionsVerilog(
             rOperations_,
@@ -1579,13 +1579,13 @@ RV32MicroCodeGenerator::generateMapVerilog(const std::string& dstDirectory) {
         addRs2ForwardingConditionsVerilog(
             sOperations_,
             &ProGe::RV32MicroCodeGenerator::constructSInstructions, stream);
-        stream << "      end;\n"
-               << "    end;\n";
+        stream << "      end\n"
+               << "    end\n";
     }
 
-    stream << "  end;" << std::endl;
+    stream << "  end" << std::endl;
 
-    stream << "end module;" << std::endl;
+    stream << "endmodule;" << std::endl;
 
     stream.close();
 }
