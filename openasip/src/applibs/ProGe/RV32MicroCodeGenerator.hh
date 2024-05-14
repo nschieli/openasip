@@ -68,13 +68,13 @@ class RV32MicroCodeGenerator : public MicroCodeGenerator {
 
 public:
     RV32MicroCodeGenerator(const Machine& machine, const BinaryEncoding& bem,
-    const std::string& entityName);
+    const std::string& entityName, HDL& language);
     ~RV32MicroCodeGenerator();
 
-    void generateRTL(HDLTemplateInstantiator& instantiator,
+    void generateRTLVHDL(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst);
 
-    void generateVerilog(HDLTemplateInstantiator& instantiator,
+    void generateRTLVerilog(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst);
 
     void setBypassInstructionRegister(const bool& value);
@@ -97,12 +97,22 @@ private:
 
     void generateFUTargetProcess(std::ofstream& stream);
 
-    void addRs1ForwardingConditions(std::map<std::string, std::string>
+    void addRs1ForwardingConditionsVHDL(std::map<std::string, std::string>
     ops, std::unordered_map<std::string, InstructionBitVector*>
     (ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2) const,
     std::ofstream& stream) const;
 
-    void addRs2ForwardingConditions(std::map<std::string, std::string>
+    void addRs1ForwardingConditionsVerilog(std::map<std::string, std::string>
+    ops, std::unordered_map<std::string, InstructionBitVector*>
+    (ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2) const,
+    std::ofstream& stream) const;
+
+    void addRs2ForwardingConditionsVHDL(std::map<std::string, std::string>
+    ops, std::unordered_map<std::string, InstructionBitVector*>
+    (ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2) const,
+    std::ofstream& stream) const;
+
+    void addRs2ForwardingConditionsVerilog(std::map<std::string, std::string>
     ops, std::unordered_map<std::string, InstructionBitVector*>
     (ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2) const,
     std::ofstream& stream) const;
@@ -157,7 +167,8 @@ private:
         const std::map<std::string, std::string> encodings,
         std::ofstream& stream) const;
 
-    void generateMap(const std::string& dstDirectory);
+    void generateMapVHDL(const std::string& dstDirectory);
+    void generateMapVerilog(const std::string& dstDirectory);
 
     void generateWrapper(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst);

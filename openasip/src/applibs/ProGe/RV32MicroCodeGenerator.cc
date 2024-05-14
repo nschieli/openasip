@@ -80,9 +80,9 @@ namespace ProGe {
 
 RV32MicroCodeGenerator::RV32MicroCodeGenerator(
     const Machine& machine, const BinaryEncoding& bem,
-    const std::string& entityName)
+    const std::string& entityName, HDL& language)
     : 
-      MicroCodeGenerator(machine, bem, entityName),
+      MicroCodeGenerator(machine, bem, entityName, language),
       RF_(NULL),
       rs1Bus_(NULL),
       rs2Bus_(NULL),
@@ -956,7 +956,7 @@ RV32MicroCodeGenerator::addBitsToMap(
 }
 
 void
-RV32MicroCodeGenerator::generateFUTargetProcess(std::ofstream& stream) {
+RV32MicroCodeGenerator::generateFUTargetProcessVHDL(std::ofstream& stream) {
     std::unordered_map<std::string, std::string> operations;
     operations.insert(rOperations_.begin(), rOperations_.end());
     operations.insert(iOperations_.begin(), iOperations_.end());
@@ -976,10 +976,10 @@ RV32MicroCodeGenerator::generateFUTargetProcess(std::ofstream& stream) {
         sourcePortID_.insert({p.first, id});
         for (const auto& op : p.second) {
             if (firstCond) {
-                cond = "    if ";
+                cond = "    if (";
                 firstCond = false;
             } else {
-                cond = "    elsif ";
+                cond = "    else if (";
             }
             // Add is a special case as it is used in LUI
             if (op == "add") {
@@ -1026,8 +1026,81 @@ RV32MicroCodeGenerator::generateFUTargetProcess(std::ofstream& stream) {
            << std::endl;
 }
 
+RV32MicroCodeGenerator::generateFUTargetProcessVerilog(std::ofstream& stream) {
+    std::unordered_map<std::string, std::string> operations;
+    operations.insert(rOperations_.begin(), rOperations_.end());
+    operations.insert(iOperations_.begin(), iOperations_.end());
+    operations.insert(sOperations_.begin(), sOperations_.end());
+    operations.insert(bOperations_.begin(), bOperations_.end());
+    operations.insert(ujOperations_.begin(), ujOperations_.end());
+    int len = std::ceil(std::log2(sourceOperationMap_.size()));
+
+    stream << "  always@(fu_opcode)" << std::endl
+           << "  begin" << std::endl
+           << "    target_fu <= "<< len << "b0;" << std::endl;
+
+    int id = 0;
+    bool firstCond = true;
+    std::string cond;
+    for (const auto& p : sourceOperationMap_) {
+        sourcePortID_.insert({p.first, id});
+        for (const auto& op : p.second) {
+            if (firstCond) {
+                cond = "    if (";
+                firstCond = false;
+            } else {
+                cond = "    else if (";
+            }
+            // Add is a special case as it is used in LUI
+            if (op == "add") {
+                int iLen = iOperations_.at(op).size();
+                int uLen = ujOperations_.at("move").size();
+                int rLen = rOperations_.at(op).size();
+                stream << cond << "fu_opcode[" << iLen << "-1:0]"
+                       << " == " << iLen << "'b"
+                       << iOperations_.at(op) << " | "
+                       << "fu_opcode == \"" << rLen
+                       << "'b" << rOperations_.at(op)
+                       << " | fu_opcode[" << uLen << "-1:0] == "
+                       << uLen << "'b"
+                       << ujOperations_.at("move") << " )\n";
+
+            } else if (iOperations_.count(op) && rOperations_.count(op)) {
+                int iLen = iOperations_.at(op).size();
+                int rLen = rOperations_.at(op).size();
+                stream << cond << "fu_opcode[" << iLen << "-1:0]"
+                       << " == " << iLen << "'b" 
+                       << iOperations_.at(op) << " | "
+                       << "fu_opcode == " << rLen << "'b"
+                       << rOperations_.at(op) << " )\n";
+            } else {
+                int opLen = operations.at(op).size();
+                stream << cond << "fu_opcode[" << opLen << "-1:0]"
+                       << "== " << oLen << "'b"
+                       << operations.at(op) << " )\n";
+            }
+            stream << "      target_fu <= " << id << "'b" << len << ";\n";
+        }
+        id++;
+    }
+    stream << "    )" << std::endl << "  end" << std::endl;
+
+    stream << std::endl << std::endl;
+    int target_fu_r_len = std::ceil(std::log2(sourceOperationMap_.size()));
+    stream << "  always@(posedge clk, rstx)" << std::endl
+           << "  begin" << std::endl
+           << "    if(rstx == 1'b0)" << std::endl
+           << "      target_fu_r <= " << target_fu_r_len -1 << "'b0;"
+           << "    else if (clk == 1) // posedge event" << std::endl
+           << "         if (glock_in == 1'b0 & halt == 1'b0)" << std::endl
+           << "             target_fu_r <= target_fu;" << std::endl
+           << "  end" << std::endl
+           << std::endl
+           << std::endl;
+}
+
 void
-RV32MicroCodeGenerator::addRs1ForwardingConditions(
+RV32MicroCodeGenerator::addRs1ForwardingConditionsVHDL(
     std::map<std::string, std::string> ops,
     std::unordered_map<std::string, InstructionBitVector*> (
         ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2)
@@ -1075,8 +1148,58 @@ RV32MicroCodeGenerator::addRs1ForwardingConditions(
     stream << "        end if;" << std::endl;
 }
 
+
 void
-RV32MicroCodeGenerator::addRs2ForwardingConditions(
+RV32MicroCodeGenerator::addRs1ForwardingConditionsVerilog(
+    std::map<std::string, std::string> ops,
+    std::unordered_map<std::string, InstructionBitVector*> (
+        ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2)
+        const,
+    std::ofstream& stream) const {
+    bool firstOpcodeCond = true;
+    for (const auto& op : ops) {
+        std::string opcodeCond = "        else if (";
+        if (firstOpcodeCond) {
+            opcodeCond = "        if (";
+            firstOpcodeCond = false;
+        }
+        stream << opcodeCond << "fu_opcode[" << op.second.size()
+               << "-1:0] == " << op.second.size() << "'b" << op.second
+        if (rOperations_.count(op.first) && iOperations_.count(op.first)) {
+            stream << " | fu_opcode[" << iOperations_.at(op.first).size()
+                   << "-1:0] == " << iOperations_.at(op.first).size() << "'b"
+                   << iOperations_.at(op.first);
+        }
+        stream << " begin\n";
+        bool firstTargetCond = true;
+        for (const auto& p : sourceOperationMap_) {
+            std::string targetCond = "          else if(";
+            if (firstTargetCond) {
+                targetCond = "          if(";
+                firstTargetCond = false;
+            }
+            stream << targetCond + "target_fu_r == "
+                   << sourcePortID_.at(p.first) << " begin" << std::endl;
+            std::unordered_map<std::string, InstructionBitVector*>
+                instructions = (this->*instructionFunc)(p.first, rs2RFPort_);
+            std::string bits = instructions.at(op.first)->toString();
+            reverse(bits.begin(), bits.end());
+            bits = bits.substr(rs1BusStart_, rs1BusWidth_);
+            reverse(bits.begin(), bits.end());
+            stream << "            moves[rs1_start_c + rs1_width_c -1:"
+                   << " rs1_start_c]"
+                   << " <= \"" << bits.size() << "'b" << bits << ";" << std::endl;
+            for (const auto& val : instructions) {
+                delete val.second;
+            }
+        }
+        stream << "          end;" << std::endl;
+    }
+    stream << "          end;" << std::endl;
+}
+
+void
+RV32MicroCodeGenerator::addRs2ForwardingConditionsVHDL(
     std::map<std::string, std::string> ops,
     std::unordered_map<std::string, InstructionBitVector*> (
         ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2)
@@ -1119,7 +1242,50 @@ RV32MicroCodeGenerator::addRs2ForwardingConditions(
 }
 
 void
-RV32MicroCodeGenerator::generateMap(const std::string& dstDirectory) {
+RV32MicroCodeGenerator::addRs2ForwardingConditionsVerilog(
+    std::map<std::string, std::string> ops,
+    std::unordered_map<std::string, InstructionBitVector*> (
+        ProGe::RV32MicroCodeGenerator::*instructionFunc)(Port* p1, Port* p2)
+        const,
+    std::ofstream& stream) const {
+    bool firstOpcodeCond = true;
+    for (const auto& op : ops) {
+        std::string opcodeCond = "        else if (";
+        if (firstOpcodeCond) {
+            opcodeCond = "        if (";
+            firstOpcodeCond = false;
+        }
+        stream << opcodeCond << "fu_opcode[" << op.second.size()
+               << "-1:0] == " << op.second.size() << "'b" << op.second << "\" begin\n";
+        bool firstTargetCond = true;
+        for (const auto& p : sourceOperationMap_) {
+            std::string targetCond = "          else if(";
+            if (firstTargetCond) {
+                targetCond = "          if (";
+                firstTargetCond = false;
+            }
+            stream << targetCond + "target_fu_r == "
+                   << sourcePortID_.at(p.first) << " begin \n";
+            std::unordered_map<std::string, InstructionBitVector*>
+                instructions = (this->*instructionFunc)(rs1RFPort_, p.first);
+            std::string bits = instructions.at(op.first)->toString();
+            reverse(bits.begin(), bits.end());
+            bits = bits.substr(rs2BusStart_, rs2BusWidth_);
+            reverse(bits.begin(), bits.end());
+            stream << "            moves[rs2_start_c + rs2_width_c -1 :"
+                   << " rs2_start_c]"
+                   << " <= " << bits.size() << "'b" << bits << ";\n";
+            for (const auto& val : instructions) {
+                delete val.second;
+            }
+        }
+        stream << "          end;" << std::endl;
+    }
+    stream << "        end;" << std::endl;
+}
+
+void
+RV32MicroCodeGenerator::generateMapVHDL(const std::string& dstDirectory) {
     /*TODO: The if structure should be replaced with a case statement
             The problem is that the fu_opcode's width is different between
             formats. Don't care states in a case statement
@@ -1193,7 +1359,7 @@ RV32MicroCodeGenerator::generateMap(const std::string& dstDirectory) {
                << "  rs1_hazard  <= rs1_hazard_in;" << std::endl
                << "  rs2_hazard  <= rs2_hazard_in;" << std::endl;
         stream << std::endl;
-        generateFUTargetProcess(stream);
+        generateFUTargetProcessVHDL(stream);
     }
     stream << "  process(fu_opcode";
     if (hasForwarding_) {
@@ -1235,35 +1401,36 @@ RV32MicroCodeGenerator::generateMap(const std::string& dstDirectory) {
     instructions = constructUJInstructions();
     addBitsToMap(instructions, ujOperations_, stream);
 
-    stream << "    else" << std::endl;
-    stream << "      moves <= \"" + NOP_ + "\";" << std::endl;
+    stream  << "    else" << std::endl;
+    stream  << "      moves <= " << NOP_.size() << "'b" << NOP_ << ";" 
+            << std::endl;
 
     stream << "    end if;" << std::endl;
 
     if (hasForwarding_) {
         stream << "    if(data_hazard = '1') then\n"
                << "      if(rs1_hazard = '1') then\n";
-        addRs1ForwardingConditions(
+        addRs1ForwardingConditionsVHDL(
             rOperations_,
             &ProGe::RV32MicroCodeGenerator::constructRInstructions, stream);
-        addRs1ForwardingConditions(
+        addRs1ForwardingConditionsVHDL(
             bOperations_,
             &ProGe::RV32MicroCodeGenerator::constructBInstructions, stream);
-        addRs1ForwardingConditions(
+        addRs1ForwardingConditionsVHDL(
             sOperations_,
             &ProGe::RV32MicroCodeGenerator::constructSInstructions, stream);
-        addRs1ForwardingConditions(
+        addRs1ForwardingConditionsVHDL(
             iOperations_,
             &ProGe::RV32MicroCodeGenerator::constructIInstructions, stream);
         stream << "      end if;\n"
                << "    if(rs2_hazard = '1') then\n";
-        addRs2ForwardingConditions(
+        addRs2ForwardingConditionsVHDL(
             rOperations_,
             &ProGe::RV32MicroCodeGenerator::constructRInstructions, stream);
-        addRs2ForwardingConditions(
+        addRs2ForwardingConditionsVHDL(
             bOperations_,
             &ProGe::RV32MicroCodeGenerator::constructBInstructions, stream);
-        addRs2ForwardingConditions(
+        addRs2ForwardingConditionsVHDL(
             sOperations_,
             &ProGe::RV32MicroCodeGenerator::constructSInstructions, stream);
         stream << "      end if;\n"
@@ -1276,6 +1443,153 @@ RV32MicroCodeGenerator::generateMap(const std::string& dstDirectory) {
 
     stream.close();
 }
+
+RV32MicroCodeGenerator::generateMapVerilog(const std::string& dstDirectory) {
+    /*TODO: The if structure should be replaced with a case statement
+            The problem is that the fu_opcode's width is different between
+            formats. Don't care states in a case statement
+             is a VHDL-2OO8 feature
+    */
+    const std::string DS = FileSystem::DIRECTORY_SEPARATOR;
+    std::string mapFile = dstDirectory + DS + "rv32_microcode.v";
+
+    std::ofstream stream;
+    stream.open(mapFile);
+    stream << LicenseGenerator::generateMITLicense("2023", "//");
+
+    stream << "`include" << entityName_ << "_globals;" << std::endl
+           << std::endl
+           << std::endl;
+
+    stream  << "module rv32_microcode" << std::endl;
+            << " #( parameter rs1_start_c=" << rs1BusStart_ <<","
+            << "    parameter rs2_start_c=" << rs2BusStart_ <<","
+            << "    parameter rs1_width_c=" << rs1BusWidth_ <<","
+            << "    parameter rs2_width_c=" << rs2BusWidth_ <<") ("
+    if (hasForwarding_) {
+        stream << "  input clk;" << std::endl
+               << "  input rstx;" << std::endl
+               << "  input glock_in;" << std::endl
+               << "  input data_hazard_in;" << std::endl
+               << "  input rs1_hazard_in;" << std::endl
+               << "  input rs2_hazard_in;" << std::endl
+               << "  input halt;" << std::endl;
+    }
+    stream << "  input fu_opcode_in [16:0];" << std::endl
+           << "  output moves_out[INSTRUCTIONWIDTH-1:0]"<< std::endl
+           << ")" << std::endl
+           << std::endl
+           << "(" << std::endl
+           << "  wire fu_opcode[16:0];" << std::endl
+           << "  reg moves[INSTRUCTIONWIDTH-1:0];" << std::endl
+           
+    if (hasForwarding_) {
+        int len = std::ceil(std::log2(sourceOperationMap_.size()));
+        stream << "  reg target_fu[" << len << "-1:0];" << std::endl;
+        stream << "  reg target_fu_r[" << len << "-1:0];" << std::endl
+               << "  wire data_hazard;\n"
+               << "  wire rs1_hazard;\n"
+               << "  wire rs2_hazard;\n";
+    }
+
+    stream  << std::endl
+            << "  assign fu_opcode = fu_opcode_in;" << std::endl
+            << "  assign mouves_out = moves;" << std::endl
+            << std::endl;
+
+    if (hasForwarding_) {
+        stream << "  assign data_hazard = data_hazard_in;" << std::endl
+               << "  assign rs1_hazard  = rs1_hazard_in;" << std::endl
+               << "  assign rs2_hazard  = rs2_hazard_in;" << std::endl;
+        stream << std::endl;
+        generateFUTargetProcessVerilog(stream);
+    }
+    stream << "  always@(fu_opcode";
+    if (hasForwarding_) {
+        stream << ", data_hazard, rs1_hazard, rs2_hazard, target_fu_r";
+    }
+    stream << ")" << std::endl;
+    stream << "  begin" << std::endl;
+
+    std::unordered_map<std::string, InstructionBitVector*> instructions =
+        constructRInstructions(rs1RFPort_, rs2RFPort_);
+    bool firstCond = true;
+    for (const auto& op : instructions) {
+        if (firstCond) {
+            int rLen = rOperations_at(op.first).size();
+            int sLen = op.second->toString().size();
+            stream  << "    if (fu_opcode == \"" << rLen
+                    << "'b" << rOperations_.at(op.first)
+                    << ")  " << std::endl
+                    << "      moves <= " << sLen
+                    << "'b" << op.second->toString() << ";"
+                    << std::endl;
+            delete op.second;
+            firstCond = false;
+            continue;
+        }
+        int rLen = rOperations_.at(op.first).size();
+        int sLen = op.second->toString().size();
+        stream << "    else if(fu_opcode[" << rOperations_.at(op.first).size()
+               << " - 1:0] == " << rLen << "'b" << rOperations_.at(op.first)
+               << ")" << std::endl
+               << "      moves <= " << sLen << "'b" << op.second->toString() << ";"
+               << std::endl;
+        delete op.second;
+    }
+
+    instructions = constructIInstructions(rs1RFPort_, rs1RFPort_);
+    addBitsToMap(instructions, iOperations_, stream);
+
+    instructions = constructSInstructions(rs1RFPort_, rs2RFPort_);
+    addBitsToMap(instructions, sOperations_, stream);
+
+    instructions = constructBInstructions(rs1RFPort_, rs2RFPort_);
+    addBitsToMap(instructions, bOperations_, stream);
+
+    instructions = constructUJInstructions();
+    addBitsToMap(instructions, ujOperations_, stream);
+
+    stream << "    else" << std::endl;
+    stream << "      moves <= \"" + NOP_ + "\";" << std::endl;
+
+    if (hasForwarding_) {
+        stream << "    if(data_hazard == 1'b1) begin" << std::endl
+               << "      if(rs1_hazard == 1'b1) begin" << std::endl;
+        addRs1ForwardingConditionsVerilog(
+            rOperations_,
+            &ProGe::RV32MicroCodeGenerator::constructRInstructions, stream);
+        addRs1ForwardingConditionsVerilog(
+            bOperations_,
+            &ProGe::RV32MicroCodeGenerator::constructBInstructions, stream);
+        addRs1ForwardingConditionsVerilog(
+            sOperations_,
+            &ProGe::RV32MicroCodeGenerator::constructSInstructions, stream);
+        addRs1ForwardingConditionsVerilog(
+            iOperations_,
+            &ProGe::RV32MicroCodeGenerator::constructIInstructions, stream);
+        stream << "      end;\n"
+               << "    if(rs2_hazard == 1'b1) begin\n";
+        addRs2ForwardingConditionsVerilog(
+            rOperations_,
+            &ProGe::RV32MicroCodeGenerator::constructRInstructions, stream);
+        addRs2ForwardingConditionsVerilog(
+            bOperations_,
+            &ProGe::RV32MicroCodeGenerator::constructBInstructions, stream);
+        addRs2ForwardingConditionsVerilog(
+            sOperations_,
+            &ProGe::RV32MicroCodeGenerator::constructSInstructions, stream);
+        stream << "      end;\n"
+               << "    end;\n";
+    }
+
+    stream << "  end;" << std::endl;
+
+    stream << "end module;" << std::endl;
+
+    stream.close();
+}
+
 
 std::string
 RV32MicroCodeGenerator::generateOperationLatencyLogic(
@@ -1339,7 +1653,7 @@ RV32MicroCodeGenerator::generateOperationLatencyLogic(
 }
 
 void
-RV32MicroCodeGenerator::generateWrapper(
+RV32MicroCodeGenerator::generateWrapperVHDL(
     HDLTemplateInstantiator& instantiator, const std::string& fileDst) {
     instantiator.replacePlaceholder(
         "rs1-bus-width", std::to_string(rs1BusWidth_));
@@ -1555,17 +1869,233 @@ RV32MicroCodeGenerator::generateWrapper(
         fileDst + DS + "rv32_microcode_wrapper.vhdl");
 }
 
-void
-RV32MicroCodeGenerator::generateRTL(
+
+RV32MicroCodeGenerator::generateWrapperVerilog(
     HDLTemplateInstantiator& instantiator, const std::string& fileDst) {
-    generateMap(fileDst);
-    generateWrapper(instantiator, fileDst);
+    instantiator.replacePlaceholder(
+        "rs1-bus-width", std::to_string(rs1BusWidth_));
+    instantiator.replacePlaceholder(
+        "rs2-bus-width", std::to_string(rs2BusWidth_));
+    instantiator.replacePlaceholder(
+        "rd-bus-width", std::to_string(rdBusWidth_));
+    instantiator.replacePlaceholder(
+        "simm-bus-width", std::to_string(simmBusWidth_));
+
+    instantiator.replacePlaceholder(
+        "rs1-bus-start", std::to_string(rs1BusStart_));
+    instantiator.replacePlaceholder(
+        "rs2-bus-start", std::to_string(rs2BusStart_));
+    instantiator.replacePlaceholder(
+        "rd-bus-start", std::to_string(rdBusStart_));
+    instantiator.replacePlaceholder(
+        "simm-bus-start", std::to_string(simmBusStart_));
+
+    instantiator.replacePlaceholder(
+        "rs1-rf-start", std::to_string(rs1RFStart_));
+    instantiator.replacePlaceholder(
+        "rs2-rf-start", std::to_string(rs2RFStart_));
+    instantiator.replacePlaceholder(
+        "rd-rf-start", std::to_string(rdRFStart_));
+    instantiator.replacePlaceholder(
+        "simm-rf-start", std::to_string(simmRFStart_));
+
+    if (eVariant_) {
+        instantiator.replacePlaceholder("rf-width", std::to_string(4));
+    } else {
+        instantiator.replacePlaceholder("rf-width", std::to_string(5));
+    }
+
+    std::string nop = NOP_;
+    reverse(nop.begin(), nop.end());
+    nop = nop.substr(rdBusStart_, rdBusWidth_);
+    reverse(nop.begin(), nop.end());
+    const std::string rdNOP = nop;
+
+    instantiator.replacePlaceholder("rd-nop", rdNOP);
+    instantiator.replacePlaceholder("nop-instruction", NOP_);
+    instantiator.replacePlaceholder(
+        "rv32-microcode-simm-assign", "simm_out <= simm_r;");
+
+    const std::string DS = FileSystem::DIRECTORY_SEPARATOR;
+    const std::string templateDir = Environment::dataDirPath("ProGe");
+
+    instantiator.replacePlaceholder(
+        "rv32-microcode-instruction-assign",
+        "instruction <= instruction_in;");
+
+    if (hasForwarding_) {
+        std::string forwardingPorts =
+            "  clk            : in std_logic;\n"
+            "  rstx           : in std_logic;\n"
+            "  glock_in       : in std_logic;\n"
+            "  data_hazard_in : in std_logic;\n"
+            "  rs1_hazard_in  : in std_logic;\n"
+            "  rs2_hazard_in  : in std_logic;\n"
+            "  halt           : in std_logic;\n";
+
+        std::string forwardingPortMapping =
+            "clk              => clk,\n"
+            "rstx             => rstx,\n"
+            "glock_in         => glock_in,\n"
+            "data_hazard_in   => data_hazard,\n"
+            "rs1_hazard_in    => rs1_hazard,\n"
+            "rs2_hazard_in    => rs2_hazard,\n"
+            "halt             => filling_instruction_pipeline,";
+
+        instantiator.replacePlaceholder("forwarding-ports", forwardingPorts);
+        instantiator.replacePlaceholder(
+            "forwarding-port-mapping", forwardingPortMapping);
+    } else {
+        instantiator.replacePlaceholder(
+            "data-hazard-stall", "and data_hazard = '0'");
+        instantiator.replacePlaceholder(
+            "data-hazard-assign-conds",
+            "elsif(data_hazard_r = '1') then\n"
+            "  data_hazard <= '0';");
+        instantiator.replacePlaceholder(
+            "data-hazard-detection-sensitivity-list-signals",
+            ", data_hazard_r");
+    }
+    instantiator.replacePlaceholder(
+        "rv32-microcode-op-latency-process",
+        generateOperationLatencyLogic(instantiator));
+    std::string otherStates;
+
+    if (variableLengthOpLatency_) {
+        otherStates += ",HANDLE_OP_LATENCY";
+    }
+    if (!bypassInstructionRegister_) {
+        otherStates += ",FILL_INSTRUCTION_PIPELINE_2";
+    }
+    instantiator.replacePlaceholder(
+        "rv32-microcode-other-states", otherStates);
+    std::string executeLogic;
+    std::string fsm_sensitivity_list_signals;
+    executeLogic =
+        "  if(glock_in = '1') then\n"
+        "    bubble <= '1';\n"
+        "    stall_ifetch <= '0';\n"
+        "    NS <= EXECUTE;\n"
+        "  elsif (rv_jump_wire = '1' or rv_auipc_wire = '1') then\n"
+        "     rd_bus_move <= rd_move;\n"
+        "     stall_ifetch <= '0';\n"
+        "     bubble <= '1';\n"
+        "     if rv_auipc_wire = '0' then\n"
+        "       NS <= FILL_INSTRUCTION_PIPELINE;\n"
+        "     end if;\n";
+    if (!hasForwarding_) {
+        fsm_sensitivity_list_signals = ", data_hazard";
+        if (variableLengthOpLatency_) {
+            executeLogic +=
+                "  elsif(op_latency_stall = '1' and data_hazard = '0') then\n"
+                "    bubble <= '0';\n"
+                "    NS <= HANDLE_OP_LATENCY;\n"
+                "    stall_ifetch <= '1';\n"
+                "    rd_bus_move <= rd_nop_c;\n";
+        }
+        executeLogic +=
+            "  elsif(data_hazard = '1') then\n"
+            "    bubble <= '1';\n"
+            "    rd_bus_move <= rd_nop_c;\n"
+            "    stall_ifetch <= '1';\n"
+            "    NS <= EXECUTE;\n"
+            "  elsif (is_control_flow_op = '1') then\n"
+            "    bubble <= '0';\n"
+            "    stall_ifetch <= '1';\n"
+            "    NS <= HANDLE_CONTROL_FLOW_OP;\n"
+            "    handle_control_flow_ns <= '1';\n"
+            "  else\n"
+            "    bubble <= '0';\n"
+            "    stall_ifetch <= '0';\n"
+            "    NS <= EXECUTE;\n"
+            "  end if;\n";
+    } else {
+        if (variableLengthOpLatency_) {
+            executeLogic +=
+                "  elsif(op_latency_stall = '1') then\n"
+                "    bubble <= '0';\n"
+                "    NS <= HANDLE_OP_LATENCY;\n"
+                "    stall_ifetch <= '1';\n"
+                "    rd_bus_move <= rd_nop_c;\n";
+        }
+        executeLogic +=
+            "  elsif (is_control_flow_op = '1') then\n"
+            "    bubble <= '0';\n"
+            "    stall_ifetch <= '1';\n"
+            "    NS <= HANDLE_CONTROL_FLOW_OP;\n"
+            "    handle_control_flow_ns <= '1';\n"
+            "  else\n"
+            "    bubble <= '0';\n"
+            "    stall_ifetch <= '0';\n"
+            "    NS <= EXECUTE;\n"
+            "  end if;\n";
+    }
+    if (variableLengthOpLatency_) {
+        fsm_sensitivity_list_signals += ",  op_latency_stall";
+        executeLogic +=
+            "\n"
+            "when HANDLE_OP_LATENCY =>\n"
+            "  bubble <= '1';\n"
+            "  stall_ifetch <= '1';\n"
+            "  rd_bus_move <= rd_nop_c;\n"
+            "  NS <= HANDLE_OP_LATENCY;\n"
+            "  if(op_latency_stall = '0') then\n"
+            "    NS <= EXECUTE;\n"
+            "    stall_ifetch <= '0';\n"
+            "    rd_bus_move <= rd_move;\n"
+            "  end if;";
+    }
+    std::string instructionPipelineStates;
+    if (bypassInstructionRegister_) {
+        instructionPipelineStates =
+            "when FILL_INSTRUCTION_PIPELINE =>\n"
+            "  filling_instruction_pipeline <= '1';\n"
+            "  bubble <= '1';\n"
+            "  rd_bus_move <= rd_nop_c;\n"
+            "  stall_ifetch <= '0';\n"
+            "  NS <= EXECUTE;\n";
+    } else {
+        instructionPipelineStates =
+            "when FILL_INSTRUCTION_PIPELINE =>\n"
+            "  filling_instruction_pipeline <= '1';\n"
+            "  bubble <= '1';\n"
+            "  rd_bus_move <= rd_nop_c;\n"
+            "  stall_ifetch <= '0';\n"
+            "  NS <= FILL_INSTRUCTION_PIPELINE_2;\n"
+            "\n"
+            "\n"
+            "when FILL_INSTRUCTION_PIPELINE_2 =>\n"
+            "  filling_instruction_pipeline <= '1';\n"
+            "  bubble <= '1';\n"
+            "  rd_bus_move <= rd_nop_c;\n"
+            "  stall_ifetch <= '0';\n"
+            "  NS <= EXECUTE;\n"
+            "\n";
+    }
+    instantiator.replacePlaceholder(
+        "rv32-microcode-instruction-pipeline-logic",
+        instructionPipelineStates);
+
+    instantiator.replacePlaceholder(
+        "rv32-microcode-fsm-sensitivity-list-signals",
+        fsm_sensitivity_list_signals);
+    instantiator.replacePlaceholder(
+        "rv32-microcode-execute-logic", executeLogic);
+    instantiator.instantiateTemplateFile(
+        templateDir + DS + "rv32_microcode_wrapper.vhdl.tmpl",
+        fileDst + DS + "rv32_microcode_wrapper.vhdl");
+}
+void
+RV32MicroCodeGenerator::generateRTLVHDL(
+    HDLTemplateInstantiator& instantiator, const std::string& fileDst) {
+    generateMapVHDL(fileDst);
+    generateWrapperVHDL(instantiator, fileDst);
 }
 
-void
-RV32MicroCodeGenerator::generateVerilog(
+RV32MicroCodeGenerator::generateRTLVerilog(
     HDLTemplateInstantiator& instantiator, const std::string& fileDst) {
-    std::cout << "Generate Verilog Risv32 RTL" << std::endl;
+    generateMapVerilog(fileDst);
+    generateWrapperVerilog(instantiator, fileDst);
 }
 
 void

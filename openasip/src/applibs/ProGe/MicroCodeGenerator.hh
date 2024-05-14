@@ -30,6 +30,8 @@
 
 #include <string>
 
+#include "ProgeTypes.hh"
+
 namespace TTAMachine {
     class Machine;
     class Bus;
@@ -48,15 +50,15 @@ class MicroCodeGenerator {
 
 public:
     MicroCodeGenerator(const Machine& machine, const BinaryEncoding& bem,
-    const std::string& entityName)
-    : machine_(&machine), bem_(&bem), entityName_(entityName) {};
+    const std::string& entityName, HDL& language)
+    : machine_(&machine), bem_(&bem), entityName_(entityName), language_(language) {};
     ~MicroCodeGenerator() = default;
 
-    virtual void generateRTL(HDLTemplateInstantiator& instantiator,
+    virtual void generateRTLVHDL(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst) = 0;
 
-    void generateVerilog(HDLTemplateInstantiator& instantiator,
-    const std::string& fileDst);
+    void generateRTLVerilog(HDLTemplateInstantiator& instantiator,
+    const std::string& fileDst) =0;
     struct Connection {
         Bus* bus;
         Port* port;
@@ -65,6 +67,7 @@ protected:
     const Machine* machine_;
     const BinaryEncoding* bem_;
     const std::string entityName_;
+    const HDL language_;
 };
 }
 #endif
