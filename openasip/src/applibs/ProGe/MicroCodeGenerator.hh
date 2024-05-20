@@ -29,8 +29,7 @@
 
 
 #include <string>
-
-#include "ProgeTypes.hh"
+#include "./ProGeTypes.hh"
 
 namespace TTAMachine {
     class Machine;
@@ -46,6 +45,8 @@ using namespace TTAMachine;
 
 namespace ProGe {
 
+
+
 class MicroCodeGenerator {
 
 public:
@@ -57,8 +58,8 @@ public:
     virtual void generateRTLVHDL(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst) = 0;
 
-    void generateRTLVerilog(HDLTemplateInstantiator& instantiator,
-    const std::string& fileDst) =0;
+    virtual void generateRTLVerilog(HDLTemplateInstantiator& instantiator,
+    const std::string& fileDst) = 0;
     struct Connection {
         Bus* bus;
         Port* port;

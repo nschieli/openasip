@@ -1419,13 +1419,23 @@ public:
                 " and " + IFETCH_STALL_PORT_NAME + " = '0'");
             instantiator.replacePlaceholder(
                 "ifetch-stall-port-declarations",
-                IFETCH_STALL_PORT_NAME + " : in std_logic;")
+                IFETCH_STALL_PORT_NAME + " : in std_logic;");
 
-            ProGe::RV32MicroCodeGenerator* microCodeGen =
-                new RV32MicroCodeGenerator(ttamachine_, bem_, entityString, language);
-            microCodeGen->setBypassInstructionRegister(
-                bypassInstructionRegister());
-                microCodeGen->generateRTL(instantiator, dstDirectory);
+            ProGe::RV32MicroCodeGenerator* microCodeGen = new RV32MicroCodeGenerator(ttamachine_, bem_, entityString, language);
+            switch (language) {
+                case HDL::VHDL:
+                    microCodeGen->setBypassInstructionRegister( bypassInstructionRegister());
+                    microCodeGen->generateRTLVHDL(instantiator, dstDirectory);
+                break;
+                case HDL::Verilog:
+                    microCodeGen->setBypassInstructionRegister(bypassInstructionRegister());
+                    microCodeGen->generateRTLVHDL(instantiator, dstDirectory);
+                break;
+                default:
+                    std::string errorMsg =
+                        "Language other than VHDL or Verilog is not supported";
+                    throw Exception(__FILE__, __LINE__, __func__, errorMsg);
+            }
         }
 
         if (generateBusTrace()) {

@@ -1026,6 +1026,7 @@ RV32MicroCodeGenerator::generateFUTargetProcessVHDL(std::ofstream& stream) {
            << std::endl;
 }
 
+void
 RV32MicroCodeGenerator::generateFUTargetProcessVerilog(std::ofstream& stream) {
     std::unordered_map<std::string, std::string> operations;
     operations.insert(rOperations_.begin(), rOperations_.end());
@@ -1076,7 +1077,7 @@ RV32MicroCodeGenerator::generateFUTargetProcessVerilog(std::ofstream& stream) {
             } else {
                 int opLen = operations.at(op).size();
                 stream << cond << "fu_opcode[" << opLen << "-1:0]"
-                       << "== " << oLen << "'b"
+                       << "== " << opLen << "'b"
                        << operations.at(op) << " )\n";
             }
             stream << "      target_fu <= " << id << "'b" << len << ";\n";
@@ -1164,7 +1165,7 @@ RV32MicroCodeGenerator::addRs1ForwardingConditionsVerilog(
             firstOpcodeCond = false;
         }
         stream << opcodeCond << "fu_opcode[" << op.second.size()
-               << "-1:0] == " << op.second.size() << "'b" << op.second
+               << "-1:0] == " << op.second.size() << "'b" << op.second;
         if (rOperations_.count(op.first) && iOperations_.count(op.first)) {
             stream << " | fu_opcode[" << iOperations_.at(op.first).size()
                    << "-1:0] == " << iOperations_.at(op.first).size() << "'b"
@@ -1444,6 +1445,7 @@ RV32MicroCodeGenerator::generateMapVHDL(const std::string& dstDirectory) {
     stream.close();
 }
 
+void
 RV32MicroCodeGenerator::generateMapVerilog(const std::string& dstDirectory) {
     /*TODO: The if structure should be replaced with a case statement
             The problem is that the fu_opcode's width is different between
@@ -1461,11 +1463,11 @@ RV32MicroCodeGenerator::generateMapVerilog(const std::string& dstDirectory) {
            << std::endl
            << std::endl;
 
-    stream  << "module rv32_microcode" << std::endl;
+    stream  << "module rv32_microcode" << std::endl
             << " #( parameter rs1_start_c=" << rs1BusStart_ <<","
             << "    parameter rs2_start_c=" << rs2BusStart_ <<","
             << "    parameter rs1_width_c=" << rs1BusWidth_ <<","
-            << "    parameter rs2_width_c=" << rs2BusWidth_ <<") ("
+            << "    parameter rs2_width_c=" << rs2BusWidth_ <<") (";
     if (hasForwarding_) {
         stream << "  input clk;" << std::endl
                << "  input rstx;" << std::endl
@@ -1481,7 +1483,7 @@ RV32MicroCodeGenerator::generateMapVerilog(const std::string& dstDirectory) {
            << std::endl
            << "(" << std::endl
            << "  wire fu_opcode[16:0];" << std::endl
-           << "  reg moves[INSTRUCTIONWIDTH-1:0];" << std::endl
+           << "  reg moves[INSTRUCTIONWIDTH-1:0];" << std::endl;
            
     if (hasForwarding_) {
         int len = std::ceil(std::log2(sourceOperationMap_.size()));
@@ -1516,7 +1518,7 @@ RV32MicroCodeGenerator::generateMapVerilog(const std::string& dstDirectory) {
     bool firstCond = true;
     for (const auto& op : instructions) {
         if (firstCond) {
-            int rLen = rOperations_at(op.first).size();
+            int rLen = rOperations_.at(op.first).size();
             int sLen = op.second->toString().size();
             stream  << "    if (fu_opcode == \"" << rLen
                     << "'b" << rOperations_.at(op.first)
@@ -1869,7 +1871,7 @@ RV32MicroCodeGenerator::generateWrapperVHDL(
         fileDst + DS + "rv32_microcode_wrapper.vhdl");
 }
 
-
+void
 RV32MicroCodeGenerator::generateWrapperVerilog(
     HDLTemplateInstantiator& instantiator, const std::string& fileDst) {
     instantiator.replacePlaceholder(
@@ -2092,6 +2094,7 @@ RV32MicroCodeGenerator::generateRTLVHDL(
     generateWrapperVHDL(instantiator, fileDst);
 }
 
+void
 RV32MicroCodeGenerator::generateRTLVerilog(
     HDLTemplateInstantiator& instantiator, const std::string& fileDst) {
     generateMapVerilog(fileDst);

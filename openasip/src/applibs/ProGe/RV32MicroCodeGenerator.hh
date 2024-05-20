@@ -95,7 +95,8 @@ private:
 
     void findOperationSources();
 
-    void generateFUTargetProcess(std::ofstream& stream);
+    void generateFUTargetProcessVHDL(std::ofstream& stream);
+    void generateFUTargetProcessVerilog(std::ofstream& stream);
 
     void addRs1ForwardingConditionsVHDL(std::map<std::string, std::string>
     ops, std::unordered_map<std::string, InstructionBitVector*>
@@ -170,7 +171,9 @@ private:
     void generateMapVHDL(const std::string& dstDirectory);
     void generateMapVerilog(const std::string& dstDirectory);
 
-    void generateWrapper(HDLTemplateInstantiator& instantiator,
+    void generateWrapperVHDL(HDLTemplateInstantiator& instantiator,
+    const std::string& fileDst);
+    void generateWrapperVerilog(HDLTemplateInstantiator& instantiator,
     const std::string& fileDst);
 
     void generateNOP();
